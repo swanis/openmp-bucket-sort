@@ -12,3 +12,6 @@
 
 # Allow Makefiles
 !Makefile
+
+# Disallow vscode settings
+settings.json
