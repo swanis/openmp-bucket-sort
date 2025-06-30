@@ -7,7 +7,7 @@
 #include <math.h>
 #include <float.h>
 
-#define NUM_THREADS 23
+#define NUM_THREADS 22
 #define NUM_ELEMENTS 100000000
 #define NUM_BUCKETS 10000
 
@@ -17,6 +17,7 @@ typedef struct bucket {
 	double arr[];
 } bucket_t;
 
+// Assignments
 static double get_wall_seconds() {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
@@ -60,9 +61,9 @@ void bubble_sort(bucket_t *bucket) {
 	}
 }
 
-// Hoare partition scheme
+// Hoare partition scheme - Wikipedia page
 int partition(double *arr, int lo, int hi) {
-	double pivot = arr[lo]; // choose pivot better
+	double pivot = arr[lo];
 	int i = lo - 1, j = hi + 1;
 	double tmp;
 
@@ -143,15 +144,14 @@ void bucket_sort(double *nums) {
 	double min, max;
 	get_min_and_max(nums, NUM_ELEMENTS, &min, &max);
 
-	// We should only time the concurrent sorting, using the time function from previous labs etc
-
 	#pragma omp parallel num_threads(NUM_THREADS)
 	{
 		int thread_num = omp_get_thread_num();
 		int bucket_index, bucket_size;
+		bucket_t *bucket;
 		for (bucket_index = thread_num; bucket_index < NUM_BUCKETS; bucket_index+=NUM_THREADS) {
 			bucket_size = NUM_ELEMENTS / NUM_BUCKETS * 1.1;
-			bucket_t *bucket = malloc(sizeof(bucket_t) + bucket_size * sizeof(double));
+			bucket = malloc(sizeof(bucket_t) + bucket_size * sizeof(double));
 			bucket->size = bucket_size;
 			bucket->length = 0;
 			buckets[bucket_index] = bucket;
@@ -159,13 +159,11 @@ void bucket_sort(double *nums) {
 
 		int i, matching_bucket;
 		for (i = 0; i < NUM_ELEMENTS; i++) {
-			// second part is for ceiling, so add 1 if there is a remainder. and -1 at the end is included in the formula
 			matching_bucket = nums[i] != min ? ceil((nums[i]-min)/(max-min)*NUM_BUCKETS)-1 : 0;
 			if (matching_bucket % NUM_THREADS == thread_num) {
-				bucket_t *bucket = buckets[matching_bucket];
+				bucket = buckets[matching_bucket];
 				if (++bucket->length > bucket->size) {
-					//realloc - maybe add more than 1 to bucket size
-					bucket_size += 1;
+					bucket_size += NUM_ELEMENTS / NUM_BUCKETS * 0.1 + 1; // always add one if 0 - maybe exponential growth??
 					bucket = realloc(bucket, sizeof(bucket_t) + bucket_size * sizeof(double));
 					bucket->size = bucket_size;
 					buckets[matching_bucket] = bucket;
@@ -176,20 +174,19 @@ void bucket_sort(double *nums) {
 		}
 
 		for (bucket_index = thread_num; bucket_index < NUM_BUCKETS; bucket_index+=NUM_THREADS) {
-			//bubble_sort(bucket);
-			bucket_t *bucket = buckets[bucket_index];
+			bucket = buckets[bucket_index];
 			quick_sort(bucket->arr, 0, bucket->length - 1);
 		}
 
-		// BLOCK UNTIL ALL THREADS HAVE SORTED
+		// We block until all threads have sorted their buckets
 		#pragma omp barrier
 
-		// WRITE BACK TO GLOBAL ARRAY (ADD LENGTH OF ALL BUCKETS UNDER CURRENT ONE TO GET LOCATION TO WRITE TO)
+		// We write back the elements in our buckets to the global array at their appropriate places
 		int base = 0;
 		int j;
 		for (i = 0; i < NUM_BUCKETS; i++) {
 			if (i % NUM_THREADS == thread_num) {
-				bucket_t *bucket = buckets[i];
+				bucket = buckets[i];
 				for (j = 0; j < bucket->length; j++) {
 					nums[base+j] = bucket->arr[j];
 				}
@@ -229,7 +226,6 @@ int main() {
 	generate_uniform_nums(nums);
 	double time = get_wall_seconds();
 	bucket_sort(nums);
-	// maybe ensure it is sorted
 	printf("Sorting uniform numbers took %7.3f wall seconds\n", get_wall_seconds()-time);
 	printf("Properly sorted: %i\n", ensure_sorted(nums, NUM_ELEMENTS));
 
@@ -242,7 +238,6 @@ int main() {
 	generate_exponential_nums(nums);
 	time = get_wall_seconds();
 	bucket_sort(nums);
-	// maybe ensure it is sorted
 	printf("Sorting exponential numbers took %7.3f wall seconds\n", get_wall_seconds()-time);
 	printf("Properly sorted: %i\n", ensure_sorted(nums, NUM_ELEMENTS));
 
