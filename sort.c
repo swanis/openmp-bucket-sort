@@ -7,9 +7,9 @@
 #include <math.h>
 #include <float.h>
 
-#define NUM_THREADS 22
-#define NUM_ELEMENTS 100000000
-#define NUM_BUCKETS 10000
+//#define NUM_THREADS 22
+//#define NUM_ELEMENTS 100000000
+//#define NUM_BUCKETS 10000
 
 typedef struct bucket {
 	int length;
@@ -101,24 +101,24 @@ double randfrom(double min, double max) {
 	return min + (rand() / div);
 }
 
-void generate_uniform_nums(double *nums) {
+void generate_uniform_nums(double *nums, int num_elements) {
 	int i;
-	for (i = 0; i < NUM_ELEMENTS; i++) {
-		nums[i] = randfrom(0, 100);
+	for (i = 0; i < num_elements; i++) {
+		nums[i] = randfrom(0, 1000000);
 	}
 }
 
 // Box-Muller transform (https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform)
-void generate_normal_nums(double *nums) {
+void generate_normal_nums(double *nums, int num_elements) {
 	double u1, u2, z0, value;
 	int i;
-	for (i = 0; i < NUM_ELEMENTS; i++) {
+	for (i = 0; i < num_elements; i++) {
 		u1 = (rand() + 1.0) / (RAND_MAX + 2.0); //maybe look into this random number generation - the one I posted on discord uses + 1.0 instead of 2.0 in the denominator
 		u2 = (rand() + 1.0) / (RAND_MAX + 2.0);
 
 		z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
 
-		value = z0 * 15 + 50;
+		value = z0 * 166667 + 500000;
 		nums[i] = value;
 	}
 }
@@ -130,27 +130,29 @@ double ran_expo(double lambda){
 	return -log(1- u) / lambda;
 }
 
-void generate_exponential_nums(double *nums) {
+void generate_exponential_nums(double *nums, int num_elements) {
 	int i;
-	for (i = 0; i < NUM_ELEMENTS; i++) {
-		nums[i] = ran_expo(0.03);
+	for (i = 0; i < num_elements; i++) {
+		nums[i] = ran_expo(0.000003);
 	}
 }
 
-void bucket_sort(double *nums) {
-	bucket_t *buckets[NUM_BUCKETS];
+void bucket_sort(double *nums, int num_elements, int num_buckets, int num_threads) {
+	bucket_t *buckets[num_buckets];
 
 	int i;
 	double min, max;
-	get_min_and_max(nums, NUM_ELEMENTS, &min, &max);
+	get_min_and_max(nums, num_elements, &min, &max);
 
-	#pragma omp parallel num_threads(NUM_THREADS)
+	const int initial_bucket_size = num_elements / num_buckets * 1.1;
+
+	#pragma omp parallel num_threads(num_threads)
 	{
 		int thread_num = omp_get_thread_num();
 		int bucket_index, bucket_size;
 		bucket_t *bucket;
-		for (bucket_index = thread_num; bucket_index < NUM_BUCKETS; bucket_index+=NUM_THREADS) {
-			bucket_size = NUM_ELEMENTS / NUM_BUCKETS * 1.1;
+		for (bucket_index = thread_num; bucket_index < num_buckets; bucket_index+=num_threads) {
+			bucket_size = initial_bucket_size; // this is one of the optimizations to write about
 			bucket = malloc(sizeof(bucket_t) + bucket_size * sizeof(double));
 			bucket->size = bucket_size;
 			bucket->length = 0;
@@ -158,12 +160,14 @@ void bucket_sort(double *nums) {
 		}
 
 		int i, matching_bucket;
-		for (i = 0; i < NUM_ELEMENTS; i++) {
-			matching_bucket = nums[i] != min ? ceil((nums[i]-min)/(max-min)*NUM_BUCKETS)-1 : 0;
-			if (matching_bucket % NUM_THREADS == thread_num) {
+		for (i = 0; i < num_elements; i++) {
+			matching_bucket = nums[i] != min ? ceil((nums[i]-min)/(max-min)*num_buckets)-1 : 0;
+			if (matching_bucket % num_threads == thread_num) {
 				bucket = buckets[matching_bucket];
-				if (++bucket->length > bucket->size) {
-					bucket_size += NUM_ELEMENTS / NUM_BUCKETS * 0.1 + 1; // always add one if 0 - maybe exponential growth??
+				bucket_size = bucket->size;
+				if (++bucket->length > bucket_size) {
+					//bucket_size += num_elements / num_buckets * 0.1 + 1; // always add one if 0 - maybe exponential growth??
+					bucket_size = bucket_size * 1.5 + 1; // this seems to be faster testing with ./sort 100000000 10000 22
 					bucket = realloc(bucket, sizeof(bucket_t) + bucket_size * sizeof(double));
 					bucket->size = bucket_size;
 					buckets[matching_bucket] = bucket;
@@ -173,7 +177,7 @@ void bucket_sort(double *nums) {
 			}
 		}
 
-		for (bucket_index = thread_num; bucket_index < NUM_BUCKETS; bucket_index+=NUM_THREADS) {
+		for (bucket_index = thread_num; bucket_index < num_buckets; bucket_index+=num_threads) {
 			bucket = buckets[bucket_index];
 			quick_sort(bucket->arr, 0, bucket->length - 1);
 		}
@@ -184,8 +188,8 @@ void bucket_sort(double *nums) {
 		// We write back the elements in our buckets to the global array at their appropriate places
 		int base = 0;
 		int j;
-		for (i = 0; i < NUM_BUCKETS; i++) {
-			if (i % NUM_THREADS == thread_num) {
+		for (i = 0; i < num_buckets; i++) {
+			if (i % num_threads == thread_num) {
 				bucket = buckets[i];
 				for (j = 0; j < bucket->length; j++) {
 					nums[base+j] = bucket->arr[j];
@@ -195,13 +199,13 @@ void bucket_sort(double *nums) {
 		}
 	}
 
-	/*for (i = 0; i < NUM_ELEMENTS; i++) {
+	/*for (i = 0; i < num_elements; i++) {
 		printf("%7.3f ", nums[i]);
 	}
 
 	printf("\n");*/
 
-	for (i = 0; i < NUM_BUCKETS; i++) {
+	for (i = 0; i < num_buckets; i++) {
 		free(buckets[i]);
 	}
 }
@@ -218,28 +222,39 @@ int ensure_sorted(double *arr, int len) {
 	return 1;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+	if (argc != 4) {
+		printf("./sort num_elements num_buckets num_threads\n");
+		return 1;
+	}
+
+	int num_elements = atoi(argv[1]);
+	int num_buckets = atoi(argv[2]);
+	int num_threads = atoi(argv[3]);
+
 	srand(time(NULL)); // Seed according to current time
 
-	double *nums = malloc(sizeof(double) * NUM_ELEMENTS); // go with heap allocation, it is safest for runtime-sized arrays
+	double *nums = malloc(sizeof(double) * num_elements); // go with heap allocation, it is safest for runtime-sized arrays
 
-	generate_uniform_nums(nums);
+	generate_uniform_nums(nums, num_elements);
 	double time = get_wall_seconds();
-	bucket_sort(nums);
+	bucket_sort(nums, num_elements, num_buckets, num_threads);
 	printf("Sorting uniform numbers took %7.3f wall seconds\n", get_wall_seconds()-time);
-	printf("Properly sorted: %i\n", ensure_sorted(nums, NUM_ELEMENTS));
+	printf("Properly sorted: %i\n", ensure_sorted(nums, num_elements));
 
-	generate_normal_nums(nums);
+	generate_normal_nums(nums, num_elements);
 	time = get_wall_seconds();
-	bucket_sort(nums);
+	bucket_sort(nums, num_elements, num_buckets, num_threads);
 	printf("Sorting normal numbers took %7.3f wall seconds\n", get_wall_seconds()-time);
-	printf("Properly sorted: %i\n", ensure_sorted(nums, NUM_ELEMENTS));
+	printf("Properly sorted: %i\n", ensure_sorted(nums, num_elements));
 
-	generate_exponential_nums(nums);
+	generate_exponential_nums(nums, num_elements);
 	time = get_wall_seconds();
-	bucket_sort(nums);
+	bucket_sort(nums, num_elements, num_buckets, num_threads);
 	printf("Sorting exponential numbers took %7.3f wall seconds\n", get_wall_seconds()-time);
-	printf("Properly sorted: %i\n", ensure_sorted(nums, NUM_ELEMENTS));
+	printf("Properly sorted: %i\n", ensure_sorted(nums, num_elements));
 
 	free(nums);
+
+	return 0;
 }
