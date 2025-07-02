@@ -7,10 +7,6 @@
 #include <math.h>
 #include <float.h>
 
-//#define NUM_THREADS 22
-//#define NUM_ELEMENTS 100000000
-//#define NUM_BUCKETS 10000
-
 typedef struct bucket {
 	int length;
 	int size;
@@ -32,33 +28,18 @@ void get_min_and_max(double *arr, int len, double *min, double *max) {
 	int i;
 	for (i = 0; i < len; i++) {
 		curr = arr[i];
+
 		if (curr < local_min) {
 			local_min = curr;
 		}
+
 		if (curr > local_max) {
 			local_max = curr;
 		}
 	}
+
 	*min = local_min;
 	*max = local_max;
-}
-
-void bubble_sort(bucket_t *bucket) {
-	int i;
-	double i_value;
-	for (i = 0; i < bucket->length; i++) {
-		i_value = bucket->arr[i];
-		int j;
-		double j_value;
-		for (j = i+1; j < bucket->length; j++) {
-			j_value = bucket->arr[j];
-			if (j_value < i_value) {
-				bucket->arr[i] = j_value;
-				bucket->arr[j] = i_value;
-				i_value = j_value;
-			}
-		}
-	}
 }
 
 // Hoare partition scheme - Wikipedia page
@@ -94,49 +75,6 @@ void quick_sort(double *arr, int lo, int hi) {
 	}
 }
 
-// from https://stackoverflow.com/a/33059025
-double randfrom(double min, double max) {
-	double range = (max - min);
-	double div = RAND_MAX / range;
-	return min + (rand() / div);
-}
-
-void generate_uniform_nums(double *nums, int num_elements) {
-	int i;
-	for (i = 0; i < num_elements; i++) {
-		nums[i] = randfrom(0, 1000000);
-	}
-}
-
-// Box-Muller transform (https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform)
-void generate_normal_nums(double *nums, int num_elements) {
-	double u1, u2, z0, value;
-	int i;
-	for (i = 0; i < num_elements; i++) {
-		u1 = (rand() + 1.0) / (RAND_MAX + 2.0); //maybe look into this random number generation - the one I posted on discord uses + 1.0 instead of 2.0 in the denominator
-		u2 = (rand() + 1.0) / (RAND_MAX + 2.0);
-
-		z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
-
-		value = z0 * 166667 + 500000;
-		nums[i] = value;
-	}
-}
-
-// from https://stackoverflow.com/a/34558404
-double ran_expo(double lambda){
-	double u;
-	u = rand() / (RAND_MAX + 1.0);
-	return -log(1- u) / lambda;
-}
-
-void generate_exponential_nums(double *nums, int num_elements) {
-	int i;
-	for (i = 0; i < num_elements; i++) {
-		nums[i] = ran_expo(0.000003);
-	}
-}
-
 void bucket_sort(double *nums, int num_elements, int num_buckets, int num_threads) {
 	bucket_t *buckets[num_buckets];
 
@@ -149,35 +87,33 @@ void bucket_sort(double *nums, int num_elements, int num_buckets, int num_thread
 	#pragma omp parallel num_threads(num_threads)
 	{
 		int thread_num = omp_get_thread_num();
-		int bucket_index, bucket_size;
+		int bucket_index;
 		bucket_t *bucket;
-		for (bucket_index = thread_num; bucket_index < num_buckets; bucket_index+=num_threads) {
-			bucket_size = initial_bucket_size; // this is one of the optimizations to write about
-			bucket = malloc(sizeof(bucket_t) + bucket_size * sizeof(double));
-			bucket->size = bucket_size;
+		for (bucket_index = thread_num; bucket_index < num_buckets; bucket_index += num_threads) {
+			bucket = malloc(sizeof(bucket_t) + initial_bucket_size * sizeof(double));
+			bucket->size = initial_bucket_size;
 			bucket->length = 0;
 			buckets[bucket_index] = bucket;
 		}
 
-		int i, matching_bucket;
+		int i;
 		for (i = 0; i < num_elements; i++) {
-			matching_bucket = nums[i] != min ? ceil((nums[i]-min)/(max-min)*num_buckets)-1 : 0;
-			if (matching_bucket % num_threads == thread_num) {
-				bucket = buckets[matching_bucket];
-				bucket_size = bucket->size;
-				if (++bucket->length > bucket_size) {
-					//bucket_size += num_elements / num_buckets * 0.1 + 1; // always add one if 0 - maybe exponential growth??
-					bucket_size = bucket_size * 1.5 + 1; // this seems to be faster testing with ./sort 100000000 10000 22
-					bucket = realloc(bucket, sizeof(bucket_t) + bucket_size * sizeof(double));
-					bucket->size = bucket_size;
-					buckets[matching_bucket] = bucket;
+			bucket_index = nums[i] != min ? ceil((nums[i] - min) / (max - min) * num_buckets) - 1 : 0;
+
+			if (bucket_index % num_threads == thread_num) {
+				bucket = buckets[bucket_index];
+
+				if (++bucket->length > bucket->size) {
+					bucket->size = bucket->size * 1.5 + 1;
+					bucket = realloc(bucket, sizeof(bucket_t) + bucket->size * sizeof(double));
+					buckets[bucket_index] = bucket;
 				}
 
 				bucket->arr[bucket->length - 1] = nums[i];
 			}
 		}
 
-		for (bucket_index = thread_num; bucket_index < num_buckets; bucket_index+=num_threads) {
+		for (bucket_index = thread_num; bucket_index < num_buckets; bucket_index += num_threads) {
 			bucket = buckets[bucket_index];
 			quick_sort(bucket->arr, 0, bucket->length - 1);
 		}
@@ -191,10 +127,12 @@ void bucket_sort(double *nums, int num_elements, int num_buckets, int num_thread
 		for (i = 0; i < num_buckets; i++) {
 			if (i % num_threads == thread_num) {
 				bucket = buckets[i];
+
 				for (j = 0; j < bucket->length; j++) {
 					nums[base+j] = bucket->arr[j];
 				}
 			}
+
 			base += buckets[i]->length;
 		}
 	}
@@ -217,9 +155,54 @@ int ensure_sorted(double *arr, int len) {
 		if (arr[i] < curr) {
 			return 0;
 		}
+
 		curr = arr[i];
 	}
+
 	return 1;
+}
+
+// from https://stackoverflow.com/a/33059025
+double randfrom(double min, double max) {
+	double range = (max - min);
+	double div = RAND_MAX / range;
+	return min + (rand() / div);
+}
+
+void generate_uniform_nums(double *nums, int num_elements) {
+	int i;
+	for (i = 0; i < num_elements; i++) {
+		nums[i] = randfrom(0, 1000000);
+	}
+}
+
+// Box-Muller transform (https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform)
+void generate_normal_nums(double *nums, int num_elements) {
+	double u1, u2, z0, value;
+	int i;
+	for (i = 0; i < num_elements; i++) {
+		u1 = (rand() + 1.0) / (RAND_MAX + 2.0);
+		u2 = (rand() + 1.0) / (RAND_MAX + 2.0);
+
+		z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+
+		value = z0 * 166667 + 500000;
+		nums[i] = value;
+	}
+}
+
+// from https://stackoverflow.com/a/34558404
+double ran_expo(double lambda){
+	double u;
+	u = rand() / (RAND_MAX + 1.0);
+	return -log(1- u) / lambda;
+}
+
+void generate_exponential_nums(double *nums, int num_elements) {
+	int i;
+	for (i = 0; i < num_elements; i++) {
+		nums[i] = ran_expo(0.000003);
+	}
 }
 
 int main(int argc, char *argv[]) {
