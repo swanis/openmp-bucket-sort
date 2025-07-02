@@ -246,6 +246,24 @@ int main(int argc, char *argv[]) {
 	int num_buckets = atoi(argv[2]);
 	int num_threads = atoi(argv[3]);
 
+	// num_elements has to be greater than 1. If there is only 1 element then it is already sorted
+	if (num_elements <= 1) {
+		printf("num_elements > 1\n");
+		return 1;
+	}
+
+	// num_buckets has to be greater than 0. We need at least 1 bucket to sort the elements
+	if (num_buckets <= 0) {
+		printf("num_buckets > 0\n");
+		return 1;
+	}
+
+	// num_threads has to be greater than 0. We need at least 1 thread to sort the elements
+	if (num_threads <= 0) {
+		printf("num_threads > 0\n");
+		return 1;
+	}
+
 	// We seed according to current time
 	srand(time(NULL));
 
