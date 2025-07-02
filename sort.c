@@ -170,7 +170,7 @@ void bucket_sort(double *nums, int num_elements, int num_buckets, int num_thread
 }
 
 // Ensures that arr is sorted, assuming it contains len elements
-// Returns 0 if it is not sorted and 1 if it is.
+// Returns 0 if it is not sorted and 1 if it is
 int ensure_sorted(double *arr, int len) {
 	double curr = -DBL_MAX;
 	int i;
